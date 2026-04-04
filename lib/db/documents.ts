@@ -46,6 +46,8 @@ export async function deleteDocument(id: string): Promise<void> {
   if (error) throw error
 }
 
+// Returns chunk metadata and content for admin preview — does NOT include embedding vectors
+// (embeddings are large float arrays, only needed during retrieval via match_chunks RPC)
 export async function getDocumentChunks(documentId: string): Promise<DocumentChunk[]> {
   const { data, error } = await db
     .from('document_chunks')

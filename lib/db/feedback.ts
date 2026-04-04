@@ -43,6 +43,9 @@ export async function getAnalytics(): Promise<{
       .limit(50),
   ])
 
+  const firstError = [totalRes.error, escalatedRes.error, notHelpfulRes.error, recentRes.error].find(Boolean)
+  if (firstError) throw firstError
+
   return {
     totalQuestions: totalRes.count ?? 0,
     escalatedCount: escalatedRes.count ?? 0,
