@@ -2,6 +2,8 @@
 import type { LLMProvider } from './types'
 import { OpenAIProvider } from './openai'
 
+// Process-scoped singleton. Safe for Node.js server deployment.
+// Not suitable for Edge Runtime (use a per-request factory there instead).
 let _instance: LLMProvider | null = null
 
 export function getLLMProvider(): LLMProvider {
