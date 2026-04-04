@@ -64,7 +64,7 @@ create table if not exists messages (
   role                text not null check (role in ('user','assistant')),
   content             text not null,
   retrieved_chunk_ids uuid[],
-  confidence_flag     text check (confidence_flag in ('high','medium','low','none')),
+  confidence_flag     text not null default 'none' check (confidence_flag in ('high','medium','low','none')),
   escalation_flag     boolean not null default false,
   created_at          timestamptz not null default now()
 );
