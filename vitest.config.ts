@@ -7,8 +7,10 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     passWithNoTests: true,
-    // Vitest 4 threads pool has a race condition on Windows — forks pool is stable
+    // Vitest 4 threads pool has an initialisation race on Windows — forks is stable
     pool: 'forks',
+    // Verbose reporter serialises output across fork processes, preventing garbled results
+    reporter: 'verbose',
   },
   resolve: {
     alias: {
