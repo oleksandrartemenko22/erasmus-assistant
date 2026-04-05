@@ -21,7 +21,7 @@
   // ── State ────────────────────────────────────────────────────────────────
   let sessionId = sessionStorage.getItem('era_session') || null
   let open = false
-  const messages = []   // { id, role, content, sources, shouldEscalate }
+  const messages = []   // { id, role, content, sources, shouldEscalate, streaming }
 
   // ── Shadow host ──────────────────────────────────────────────────────────
   const host = document.createElement('div')
@@ -93,6 +93,7 @@
     }
     #send:hover{background:#1e40af}
     #send:disabled{opacity:.5;cursor:default}
+    @keyframes blink{0%,100%{opacity:.75}50%{opacity:0}}
     @media(max-width:420px){
       #popup{width:calc(100vw - 24px);right:0}
     }
@@ -148,14 +149,27 @@
 
     messages.forEach((msg) => {
       const bubble = document.createElement('div')
+      bubble.id = msg.id ? 'msg-' + msg.id : ''
       bubble.className = 'bubble ' + msg.role
 
-      const text = document.createElement('p')
-      text.style.cssText = 'white-space:pre-wrap'
-      text.textContent = msg.content
-      bubble.appendChild(text)
+      if (msg.role === 'assistant' && msg.streaming && !msg.content) {
+        const text = document.createElement('p')
+        text.style.cssText = 'color:#9ca3af'
+        text.textContent = 'Thinking…'
+        bubble.appendChild(text)
+      } else {
+        const text = document.createElement('p')
+        text.style.cssText = 'white-space:pre-wrap'
+        text.textContent = msg.content
+        if (msg.streaming) {
+          const cursor = document.createElement('span')
+          cursor.style.cssText = 'display:inline-block;width:6px;height:14px;background:currentColor;margin-left:2px;opacity:.75;animation:blink .8s step-end infinite'
+          text.appendChild(cursor)
+        }
+        bubble.appendChild(text)
+      }
 
-      if (msg.role === 'assistant') {
+      if (msg.role === 'assistant' && !msg.streaming) {
         // Sources
         if (msg.sources && msg.sources.length > 0) {
           const srcDiv = document.createElement('div')
@@ -186,7 +200,7 @@
         if (msg.shouldEscalate) {
           const esc = document.createElement('div')
           esc.className = 'escalation'
-          esc.innerHTML = '<strong>Need more help?</strong> Contact the <a href="mailto:international@um.si">International Relations Office</a> directly.'
+          esc.innerHTML = '<strong>Need more help?</strong> Contact the <a href="mailto:incoming.erasmus@um.si">International Relations Office</a> directly.'
           bubble.appendChild(esc)
         }
 
@@ -224,31 +238,30 @@
 
       msgsEl.appendChild(bubble)
     })
-
-    msgsEl.scrollTop = msgsEl.scrollHeight
   }
 
-  function showThinking() {
-    const el = document.createElement('div')
-    el.className = 'thinking'
-    el.id = 'thinking'
-    el.textContent = 'Thinking…'
-    msgsEl.appendChild(el)
-    msgsEl.scrollTop = msgsEl.scrollHeight
-  }
-
-  function removeThinking() {
-    const el = shadow.getElementById('thinking')
-    if (el) el.remove()
+  // Scroll a new assistant message bubble into view from the top
+  function scrollToLastAssistant() {
+    const bubbles = msgsEl.querySelectorAll('.assistant')
+    const last = bubbles[bubbles.length - 1]
+    if (last) last.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   // ── Send message ──────────────────────────────────────────────────────────
   async function sendMessage(question) {
     if (!question.trim()) return
 
+    // Build history from settled messages (max 20 turns)
+    const history = messages
+      .filter((m) => !m.streaming)
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }))
+
+    const streamingId = 'stream-' + Date.now()
     messages.push({ id: 'user-' + Date.now(), role: 'user', content: question })
+    messages.push({ id: streamingId, role: 'assistant', content: '', streaming: true })
     renderMessages()
-    showThinking()
+    scrollToLastAssistant()
     inputEl.value = ''
     sendEl.disabled = true
 
@@ -260,43 +273,92 @@
           question,
           sessionId: sessionId || undefined,
           language: 'en',
+          history,
         }),
       })
 
-      removeThinking()
+      if (!res.ok || !res.body) {
+        throw new Error('Server error')
+      }
 
-      if (!res.ok) {
-        messages.push({
-          id: null,
-          role: 'assistant',
-          content: 'Sorry, something went wrong. Please try again or contact the International Relations Office.',
-          shouldEscalate: true,
-        })
-      } else {
-        const data = await res.json()
-        if (!sessionId) {
-          sessionId = data.sessionId
-          sessionStorage.setItem('era_session', sessionId)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const placeholder = messages[messages.length - 1]
+
+      while (true) {
+        const result = await reader.read()
+        if (result.done) break
+        buffer += decoder.decode(result.value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          let event
+          try { event = JSON.parse(line) } catch { continue }
+
+          if (event.type === 'delta') {
+            placeholder.content += event.content
+            // Update just the text node of the streaming bubble for performance
+            const bubbleEl = msgsEl.querySelector('#msg-' + streamingId)
+            if (bubbleEl) {
+              const p = bubbleEl.querySelector('p')
+              if (p) {
+                // Re-render only the streaming bubble
+                p.textContent = placeholder.content
+                const cursor = document.createElement('span')
+                cursor.style.cssText = 'display:inline-block;width:6px;height:14px;background:currentColor;margin-left:2px;opacity:.75;animation:blink .8s step-end infinite'
+                p.appendChild(cursor)
+              }
+            }
+          } else if (event.type === 'done') {
+            if (!sessionId) {
+              sessionId = event.sessionId
+              sessionStorage.setItem('era_session', sessionId)
+            }
+            placeholder.id = event.messageId
+            placeholder.sources = event.sources || []
+            placeholder.shouldEscalate = event.shouldEscalate || false
+            placeholder.streaming = false
+            renderMessages()
+          } else if (event.type === 'error') {
+            placeholder.content = 'Sorry, something went wrong. Please try again or contact the International Relations Office.'
+            placeholder.shouldEscalate = true
+            placeholder.streaming = false
+            renderMessages()
+          }
         }
-        messages.push({
-          id: data.messageId,
-          role: 'assistant',
-          content: data.answer,
-          sources: data.sources || [],
-          shouldEscalate: data.shouldEscalate || false,
-        })
+      }
+
+      // Flush remaining buffer
+      if (buffer.trim()) {
+        try {
+          const event = JSON.parse(buffer)
+          if (event.type === 'done') {
+            if (!sessionId) {
+              sessionId = event.sessionId
+              sessionStorage.setItem('era_session', sessionId)
+            }
+            placeholder.id = event.messageId
+            placeholder.sources = event.sources || []
+            placeholder.shouldEscalate = event.shouldEscalate || false
+            placeholder.streaming = false
+            renderMessages()
+          }
+        } catch {}
       }
     } catch {
-      removeThinking()
-      messages.push({
-        id: null,
-        role: 'assistant',
-        content: 'Could not reach the assistant. Please check your connection.',
-        shouldEscalate: true,
-      })
+      const placeholder = messages.find((m) => m.id === streamingId)
+      if (placeholder) {
+        placeholder.content = 'Could not reach the assistant. Please check your connection.'
+        placeholder.shouldEscalate = true
+        placeholder.streaming = false
+      }
+      renderMessages()
     }
 
-    renderMessages()
     sendEl.disabled = false
     inputEl.focus()
   }

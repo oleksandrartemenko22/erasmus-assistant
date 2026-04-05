@@ -15,6 +15,8 @@ export interface ChatMessage {
   content: string
   sources?: Source[]
   shouldEscalate?: boolean
+  /** True while the assistant response is still streaming in */
+  streaming?: boolean
 }
 
 interface Props {
@@ -33,15 +35,24 @@ export function MessageBubble({ message }: Props) {
             : 'bg-white border border-gray-200 text-gray-800 shadow-sm'
         }`}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        {message.streaming && !message.content ? (
+          <p className="text-gray-400">Thinking…</p>
+        ) : (
+          <p className="whitespace-pre-wrap">
+            {message.content}
+            {message.streaming && (
+              <span className="inline-block w-1.5 h-3.5 bg-current ml-0.5 opacity-75 animate-pulse" />
+            )}
+          </p>
+        )}
 
-        {!isUser && message.sources && message.sources.length > 0 && (
+        {!isUser && !message.streaming && message.sources && message.sources.length > 0 && (
           <SourceList sources={message.sources} />
         )}
 
-        {!isUser && message.shouldEscalate && <EscalationNotice />}
+        {!isUser && !message.streaming && message.shouldEscalate && <EscalationNotice />}
 
-        {!isUser && (
+        {!isUser && !message.streaming && (
           <FeedbackButtons messageId={message.id} />
         )}
       </div>

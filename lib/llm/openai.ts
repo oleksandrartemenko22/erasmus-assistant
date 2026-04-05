@@ -34,6 +34,20 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
+  async *completeStream(options: LLMCompletionOptions): AsyncGenerator<string> {
+    const stream = await this.client.chat.completions.create({
+      model: this.chatModel,
+      messages: options.messages,
+      temperature: options.temperature ?? 0.2,
+      max_completion_tokens: options.maxTokens ?? 2000,
+      stream: true,
+    })
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content
+      if (delta) yield delta
+    }
+  }
+
   async embed(text: string): Promise<number[]> {
     const response = await this.client.embeddings.create({
       model: this.embeddingModel,

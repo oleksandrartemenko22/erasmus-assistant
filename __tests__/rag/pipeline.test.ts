@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { runChatPipeline } from '@/lib/rag/pipeline'
 import type { RetrieverProvider, RetrievedChunk } from '@/lib/rag/retriever'
-import type { LLMProvider } from '@/lib/llm/types'
+import type { LLMProvider, LLMMessage } from '@/lib/llm/types'
 
 // ---------------------------------------------------------------------------
 // Minimal fakes — test real pipeline logic, not mock behaviour
@@ -27,8 +27,20 @@ function fakeRetriever(chunks: RetrievedChunk[]): RetrieverProvider {
 function fakeLLM(response: string): LLMProvider {
   return {
     complete: async () => ({ content: response }),
+    async *completeStream() { yield response },
     embed: async () => [],
   }
+}
+
+// A fake LLM that captures the messages it receives for inspection
+function capturingLLM(response: string): { llm: LLMProvider; getMessages(): LLMMessage[] } {
+  let captured: LLMMessage[] = []
+  const llm: LLMProvider = {
+    complete: async ({ messages }) => { captured = messages; return { content: response } },
+    async *completeStream({ messages }) { captured = messages; yield response },
+    embed: async () => [],
+  }
+  return { llm, getMessages: () => captured }
 }
 
 // ---------------------------------------------------------------------------
@@ -90,5 +102,41 @@ describe('runChatPipeline', () => {
     })
 
     expect(result.retrievedChunkIds).toContain('abc-123')
+  })
+
+  it('passes conversation history to the LLM as earlier turns', async () => {
+    const { llm, getMessages } = capturingLLM('Because of rule X.')
+
+    await runChatPipeline({
+      question: 'Why?',
+      history: [
+        { role: 'user', content: 'What is the application deadline?' },
+        { role: 'assistant', content: 'The deadline is March 15.' },
+      ],
+      retriever: fakeRetriever([makeChunk()]),
+      llm,
+    })
+
+    const msgs = getMessages()
+    // system + 2 history turns + current user turn
+    expect(msgs).toHaveLength(4)
+    expect(msgs[1]).toMatchObject({ role: 'user', content: 'What is the application deadline?' })
+    expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'The deadline is March 15.' })
+  })
+
+  it('works correctly with no history provided', async () => {
+    const { llm, getMessages } = capturingLLM('March 15.')
+
+    await runChatPipeline({
+      question: 'When is the deadline?',
+      retriever: fakeRetriever([makeChunk()]),
+      llm,
+    })
+
+    const msgs = getMessages()
+    // system + current user turn only
+    expect(msgs).toHaveLength(2)
+    expect(msgs[0].role).toBe('system')
+    expect(msgs[1].role).toBe('user')
   })
 })

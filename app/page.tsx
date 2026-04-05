@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, FormEvent } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { MessageBubble } from '@/components/chat/MessageBubble'
 import type { ChatMessage } from '@/components/chat/MessageBubble'
 
@@ -9,23 +9,45 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Ref on the last assistant message; used to scroll it into view from the top
+  const lastAssistantRef = useRef<HTMLDivElement>(null)
+  const prevAssistantCountRef = useRef(0)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+    const count = messages.filter((m) => m.role === 'assistant').length
+    if (count > prevAssistantCountRef.current) {
+      prevAssistantCountRef.current = count
+      lastAssistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [messages])
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     const question = input.trim()
     if (!question || loading) return
+
+    // Build history from settled messages (max 20 turns)
+    const history = messages
+      .filter((m) => !m.streaming)
+      .slice(-20)
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: question,
     }
-    setMessages((prev) => [...prev, userMsg])
+
+    const streamingId = `stream-${Date.now()}`
+    const placeholder: ChatMessage = {
+      id: streamingId,
+      role: 'assistant',
+      content: '',
+      streaming: true,
+    }
+
+    setMessages((prev) => [...prev, userMsg, placeholder])
     setInput('')
     setLoading(true)
 
@@ -33,44 +55,99 @@ export default function ChatPage() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, sessionId: sessionId ?? undefined, language: 'en' }),
+        body: JSON.stringify({
+          question,
+          sessionId: sessionId ?? undefined,
+          language: 'en',
+          history,
+        }),
       })
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { error?: string }).error ?? 'Server error')
+      if (!res.ok || !res.body) {
+        throw new Error('Server error')
       }
 
-      const data = await res.json() as {
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let doneEvent: {
         sessionId: string
         messageId: string
-        answer: string
         sources: Array<{ title: string; url: string | null; score: number }>
         shouldEscalate: boolean
+        escalationReason: string | null
+      } | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          let event: { type: string; [k: string]: unknown }
+          try {
+            event = JSON.parse(line)
+          } catch {
+            continue
+          }
+
+          if (event.type === 'delta') {
+            const content = event.content as string
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === streamingId ? { ...m, content: m.content + content } : m,
+              ),
+            )
+          } else if (event.type === 'done') {
+            doneEvent = event as typeof doneEvent
+          }
+        }
       }
 
-      if (!sessionId) setSessionId(data.sessionId)
-
-      const assistantMsg: ChatMessage = {
-        id: data.messageId,
-        role: 'assistant',
-        content: data.answer,
-        sources: data.sources,
-        shouldEscalate: data.shouldEscalate,
+      if (doneEvent) {
+        if (!sessionId) setSessionId(doneEvent.sessionId)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === streamingId
+              ? {
+                  ...m,
+                  id: doneEvent!.messageId,
+                  sources: doneEvent!.sources,
+                  shouldEscalate: doneEvent!.shouldEscalate,
+                  streaming: false,
+                }
+              : m,
+          ),
+        )
       }
-      setMessages((prev) => [...prev, assistantMsg])
     } catch (err) {
-      const assistantMsg: ChatMessage = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: 'Sorry, something went wrong. Please try again or contact the International Relations Office.',
-        shouldEscalate: true,
-      }
-      setMessages((prev) => [...prev, assistantMsg])
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === streamingId
+            ? {
+                ...m,
+                content:
+                  'Sorry, something went wrong. Please try again or contact the International Relations Office.',
+                shouldEscalate: true,
+                streaming: false,
+              }
+            : m,
+        ),
+      )
       console.error(err)
     } finally {
       setLoading(false)
     }
+  }
+
+  // Find the index of the last assistant message to attach the scroll ref
+  let lastAssistantIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') { lastAssistantIdx = i; break }
   }
 
   return (
@@ -94,19 +171,11 @@ export default function ChatPage() {
             </div>
           )}
 
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm text-sm text-gray-400">
-                Thinking…
-              </div>
+          {messages.map((msg, i) => (
+            <div key={msg.id} ref={i === lastAssistantIdx ? lastAssistantRef : undefined}>
+              <MessageBubble message={msg} />
             </div>
-          )}
-
-          <div ref={bottomRef} />
+          ))}
         </div>
       </main>
 

@@ -18,8 +18,10 @@ export interface LLMCompletionResult {
 }
 
 export interface LLMProvider {
-  /** Generate a chat completion */
+  /** Generate a chat completion (full response) */
   complete(options: LLMCompletionOptions): Promise<LLMCompletionResult>
+  /** Stream a chat completion — yields text deltas as they arrive */
+  completeStream(options: LLMCompletionOptions): AsyncGenerator<string>
   /** Generate an embedding vector for a text string */
   embed(text: string): Promise<number[]>
 }
