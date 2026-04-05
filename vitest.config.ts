@@ -7,6 +7,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     passWithNoTests: true,
+    // Vitest 4 threads pool has a race condition on Windows — forks pool is stable
+    pool: 'forks',
   },
   resolve: {
     alias: {

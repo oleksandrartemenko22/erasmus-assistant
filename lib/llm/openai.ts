@@ -22,8 +22,7 @@ export class OpenAIProvider implements LLMProvider {
       model: this.chatModel,
       messages: options.messages,
       temperature: options.temperature ?? 0.2,
-      // Note: max_tokens is deprecated in favour of max_completion_tokens for gpt-4o+
-      max_tokens: options.maxTokens ?? 1024,
+      max_completion_tokens: options.maxTokens ?? 2000,
     })
     const choice = response.choices[0]
     if (!choice) {
