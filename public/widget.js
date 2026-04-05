@@ -26,7 +26,7 @@
   // ── Shadow host ──────────────────────────────────────────────────────────
   const host = document.createElement('div')
   host.id = 'erasmus-widget-host'
-  host.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;font-family:system-ui,sans-serif;'
+  host.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;font-family:system-ui,sans-serif;'
   document.body.appendChild(host)
 
   const shadow = host.attachShadow({ mode: 'open' })
