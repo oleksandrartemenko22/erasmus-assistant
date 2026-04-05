@@ -9,8 +9,7 @@ export default defineConfig({
     passWithNoTests: true,
     // Vitest 4 threads pool has an initialisation race on Windows — forks is stable
     pool: 'forks',
-    // Verbose reporter serialises output across fork processes, preventing garbled results
-    reporter: 'verbose',
+    reporters: 'verbose',
   },
   resolve: {
     alias: {
