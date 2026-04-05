@@ -70,13 +70,14 @@ export default function ChatPage() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let doneEvent: {
+      type DoneEvent = {
         sessionId: string
         messageId: string
         sources: Array<{ title: string; url: string | null; score: number }>
         shouldEscalate: boolean
         escalationReason: string | null
-      } | null = null
+      }
+      let doneEvent: DoneEvent | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -103,7 +104,7 @@ export default function ChatPage() {
               ),
             )
           } else if (event.type === 'done') {
-            doneEvent = event as unknown as NonNullable<typeof doneEvent>
+            doneEvent = event as unknown as DoneEvent
           }
         }
       }
