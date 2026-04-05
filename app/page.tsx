@@ -103,7 +103,7 @@ export default function ChatPage() {
               ),
             )
           } else if (event.type === 'done') {
-            doneEvent = event as typeof doneEvent
+            doneEvent = event as unknown as NonNullable<typeof doneEvent>
           }
         }
       }
