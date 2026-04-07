@@ -1,6 +1,6 @@
 // lib/ingest/extract.ts
 // Text extraction from file buffers and raw HTML.
-// pdf-parse and mammoth are lazy-imported inside extractText so this module
+// unpdf and mammoth are lazy-imported inside extractText so this module
 // is safe to import in test environments that only use extractTextFromHtml.
 
 export type SupportedMimeType =
@@ -11,15 +11,9 @@ export type SupportedMimeType =
 export async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
   switch (mimeType) {
     case 'application/pdf': {
-      // pdf-parse v2 exports a class-based API: new PDFParse({ data }) → .getText() → .text
-      const { PDFParse } = await import('pdf-parse')
-      const parser = new PDFParse({ data: buffer })
-      try {
-        const result = await parser.getText()
-        return result.text
-      } finally {
-        await parser.destroy()
-      }
+      const { extractText } = await import('unpdf')
+      const { text } = await extractText(new Uint8Array(buffer))
+      return text.join(' ')
     }
     case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': {
       // Same CJS/ESM interop issue as pdf-parse.
