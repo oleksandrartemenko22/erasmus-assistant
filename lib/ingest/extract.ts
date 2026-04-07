@@ -11,13 +11,15 @@ export type SupportedMimeType =
 export async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
   switch (mimeType) {
     case 'application/pdf': {
-      // pdf-parse is CJS. CJS interop wraps the fn in { default: fn };
-      // Vercel's ESM build resolves to the ESM entry which exports it directly.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mod: any = await import('pdf-parse')
-      const pdfParse: (buf: Buffer) => Promise<{ text: string }> = mod.default ?? mod
-      const result = await pdfParse(buffer)
-      return result.text
+      // pdf-parse v2 exports a class-based API: new PDFParse({ data }) → .getText() → .text
+      const { PDFParse } = await import('pdf-parse')
+      const parser = new PDFParse({ data: buffer })
+      try {
+        const result = await parser.getText()
+        return result.text
+      } finally {
+        await parser.destroy()
+      }
     }
     case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': {
       // Same CJS/ESM interop issue as pdf-parse.

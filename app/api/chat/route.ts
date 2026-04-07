@@ -20,13 +20,35 @@ function errorResponse(message: string, status: number) {
   })
 }
 
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+const RATE_LIMIT = 20        // requests
+const RATE_WINDOW_MS = 60 * 60 * 1000  // 1 hour
+
+interface RateEntry { count: number; resetAt: number }
+const rateLimitStore = new Map<string, RateEntry>()
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitStore.get(ip)
+
+  if (!entry || now >= entry.resetAt) {
+    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
+    return true
+  }
+
+  if (entry.count >= RATE_LIMIT) return false
+
+  entry.count++
+  return true
+}
+
 const HistoryItemSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().max(4000),
 })
 
 const RequestSchema = z.object({
-  question: z.string().min(1).max(2000),
+  question: z.string().min(1).max(500),
   // Zod v4: uuid() moved to z.string().check(z.uuid())
   sessionId: z.string().check(z.uuid()).optional(),
   language: z.string().default('en'),
@@ -39,6 +61,15 @@ export function OPTIONS() {
 }
 
 export async function POST(request: Request) {
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
+    request.headers.get('x-real-ip') ??
+    'unknown'
+
+  if (!checkRateLimit(ip)) {
+    return errorResponse('Too many requests. Please try again later.', 429)
+  }
+
   let body: unknown
   try {
     body = await request.json()
@@ -48,6 +79,16 @@ export async function POST(request: Request) {
 
   const parsed = RequestSchema.safeParse(body)
   if (!parsed.success) {
+    // Surface the message-length violation with a friendlier message
+    const tooLong = parsed.error.issues.some(
+      (i) => i.path[0] === 'question' && i.code === 'too_big',
+    )
+    if (tooLong) {
+      return errorResponse(
+        'Message too long. Please keep your question under 500 characters.',
+        400,
+      )
+    }
     return errorResponse(JSON.stringify(parsed.error.issues), 422)
   }
 
