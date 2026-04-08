@@ -183,6 +183,50 @@ language sql stable as $$
 $$;
 
 -- ============================================================
+-- Row Level Security
+-- The backend connects with the service_role key, which carries
+-- BYPASSRLS in PostgreSQL — enabling RLS is therefore enough to
+-- block anon/public access entirely.  The explicit policies below
+-- make the intent unambiguous and future-proof against any change
+-- in how the connection role is configured.
+-- ============================================================
+
+-- Enable RLS on every table
+ALTER TABLE documents           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_chunks     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_sessions       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feedback            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE escalation_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE faq_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins              ENABLE ROW LEVEL SECURITY;
+
+-- Grant service_role full access; all other roles are denied by default
+CREATE POLICY "service_role_all" ON documents
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON document_chunks
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON chat_sessions
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON messages
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON feedback
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON escalation_requests
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON faq_items
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "service_role_all" ON admins
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- ============================================================
 -- Storage bucket (run separately in Supabase dashboard or CLI)
 -- ============================================================
 -- insert into storage.buckets (id, name, public) values ('documents', 'documents', false);
