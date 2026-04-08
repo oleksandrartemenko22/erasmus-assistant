@@ -55,7 +55,7 @@ export function filterExpiredChunks<T extends ChunkWithValidity>(
 
 export class SupabaseRetriever implements RetrieverProvider {
   async retrieve(query: string, options: RetrieverOptions = {}): Promise<RetrievedChunk[]> {
-    const { topK = 5, minScore = 0.5 } = options
+    const { topK = 5, minScore = 0.45 } = options
 
     // 1. Get embedding for the query via the LLM provider
     const { getLLMProvider } = await import('@/lib/llm/index')

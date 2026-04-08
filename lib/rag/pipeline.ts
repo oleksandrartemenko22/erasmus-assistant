@@ -27,16 +27,47 @@ export interface PipelineResult {
   isLegalTopic: boolean
 }
 
+/**
+ * Rewrites a poorly-worded or misspelled question into clean English
+ * for better vector-search recall.  Falls back to the original question
+ * if the LLM call fails for any reason.
+ */
+async function rewriteQuery(question: string, llm: LLMProvider): Promise<string> {
+  try {
+    const { content } = await llm.complete({
+      messages: [
+        {
+          role: 'user',
+          content:
+            'Rewrite this question in clear, standard English to improve search results. ' +
+            'Keep the same meaning but fix grammar, spelling, and word order. ' +
+            'Return only the rewritten question, nothing else.\n\n' +
+            `Question: ${question}`,
+        },
+      ],
+      temperature: 0,
+      maxTokens: 200,
+    })
+    const rewritten = content.trim()
+    return rewritten.length > 0 ? rewritten : question
+  } catch {
+    return question
+  }
+}
+
 export async function runChatPipeline(input: PipelineInput): Promise<PipelineResult> {
-  const { question, history, retriever, llm, topK = 8, minScore = 0.5 } = input
+  const { question, history, retriever, llm, topK = 8, minScore = 0.45 } = input
 
-  // 1. Retrieve relevant chunks
-  const chunks = await retriever.retrieve(question, { topK, minScore })
+  // 1. Rewrite the query to fix spelling / grammar before vector search
+  const searchQuery = await rewriteQuery(question, llm)
 
-  // 2. Build grounded prompt
+  // 2. Retrieve relevant chunks using the rewritten query
+  const chunks = await retriever.retrieve(searchQuery, { topK, minScore })
+
+  // 3. Build grounded prompt — use the ORIGINAL question so the answer feels natural
   const userMessage = buildGroundedPrompt({ question, chunks })
 
-  // 3. Generate answer — inject conversation history between system prompt and current turn
+  // 4. Generate answer — inject conversation history between system prompt and current turn
   const { content: answer } = await llm.complete({
     messages: [
       { role: 'system', content: buildSystemPrompt() },
@@ -47,7 +78,7 @@ export async function runChatPipeline(input: PipelineInput): Promise<PipelineRes
     maxTokens: 2000,
   })
 
-  // 4. Classify safety / confidence
+  // 5. Classify safety / confidence
   const classification = classifyResponse({
     chunks: chunks.map((c) => ({ score: c.score, content: c.content })),
     answer,
