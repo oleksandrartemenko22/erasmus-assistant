@@ -178,7 +178,13 @@
           lbl.className = 'sources-label'
           lbl.textContent = 'Sources'
           srcDiv.appendChild(lbl)
-          msg.sources.forEach((s) => {
+          const seenTitles = new Set()
+          const uniqueSources = msg.sources.filter((s) => {
+            if (seenTitles.has(s.title)) return false
+            seenTitles.add(s.title)
+            return true
+          })
+          uniqueSources.forEach((s) => {
             if (s.url) {
               const a = document.createElement('a')
               a.href = s.url
