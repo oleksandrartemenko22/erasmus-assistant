@@ -28,62 +28,74 @@ export interface PipelineResult {
 }
 
 /**
- * Builds a context-enriched search query by combining the last few user
- * turns with the current question.  This ensures that answers given in
- * earlier turns (e.g. "I'm from Spain, applying for studies") are taken
- * into account when searching the vector database.
+ * Produces a rich, standalone search query from the current question plus
+ * up to the last 3 conversation turns.  Sending the conversation to the LLM
+ * lets it expand short follow-ups like "Where to find application form" into
+ * "Where to find Erasmus application form URL website incomingstudents.um.si".
+ * Falls back to the raw question on any error.
  */
-function buildContextualQuery(
+async function buildSearchQuery(
   question: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }> | undefined,
-): string {
-  if (!history || history.length === 0) return question
+  llm: LLMProvider,
+): Promise<string> {
+  // With no history the question is already the full context; just clean it up.
+  if (!history || history.length === 0) {
+    try {
+      const { content } = await llm.complete({
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Rewrite this question as a clear search query in standard English. ' +
+              'Fix grammar and spelling. Return only the rewritten query.\n\n' +
+              `Question: ${question}`,
+          },
+        ],
+        temperature: 0,
+        maxTokens: 150,
+      })
+      const out = content.trim()
+      return out.length > 0 ? out : question
+    } catch {
+      return question
+    }
+  }
 
-  // Take up to the last 3 turns (user + assistant pairs count as 1 turn each)
-  const recentTurns = history.slice(-6)  // up to 3 pairs = 6 messages
+  // Build a short conversation snippet: last 3 turns (6 messages) + current question
+  const recentTurns = history.slice(-6)
+  const conversationText = recentTurns
+    .map((m) => `${m.role === 'user' ? 'Student' : 'Assistant'}: ${m.content}`)
+    .join('\n')
 
-  const userContext = recentTurns
-    .filter((m) => m.role === 'user')
-    .map((m) => m.content)
-    .join(' ')
-
-  return `${userContext} ${question}`.trim()
-}
-
-/**
- * Rewrites a context-enriched query into clean English for better
- * vector-search recall.  Falls back to the raw query on any error.
- */
-async function rewriteQuery(query: string, llm: LLMProvider): Promise<string> {
   try {
     const { content } = await llm.complete({
       messages: [
         {
           role: 'user',
           content:
-            'Rewrite this as a single clear search query in standard English. ' +
-            'Preserve all context (country, type of exchange, topic). ' +
-            'Fix grammar and spelling. Return only the rewritten query, nothing else.\n\n' +
-            `Query: ${query}`,
+            'Given this conversation, rewrite the last question as a complete, detailed ' +
+            'search query that includes all relevant context (topic, country, type of exchange, ' +
+            'specific documents or URLs mentioned). The query will be used to search a ' +
+            'university knowledge base. Return only the search query, nothing else.\n\n' +
+            `Conversation:\n${conversationText}\nStudent: ${question}`,
         },
       ],
       temperature: 0,
       maxTokens: 200,
     })
-    const rewritten = content.trim()
-    return rewritten.length > 0 ? rewritten : query
+    const out = content.trim()
+    return out.length > 0 ? out : question
   } catch {
-    return query
+    return question
   }
 }
 
 export async function runChatPipeline(input: PipelineInput): Promise<PipelineResult> {
   const { question, history, retriever, llm, topK = 8, minScore = 0.45 } = input
 
-  // 1. Build a context-enriched query from recent history + current question,
-  //    then rewrite it for better spelling/grammar before hitting the vector DB
-  const contextualQuery = buildContextualQuery(question, history)
-  const searchQuery = await rewriteQuery(contextualQuery, llm)
+  // 1. Build a rich, context-aware search query from the conversation history
+  const searchQuery = await buildSearchQuery(question, history, llm)
 
   // 2. Retrieve relevant chunks using the context-enriched query
   const chunks = await retriever.retrieve(searchQuery, { topK, minScore })
