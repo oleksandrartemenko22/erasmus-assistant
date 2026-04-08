@@ -34,7 +34,7 @@ export interface PipelineResult {
  * "Where to find Erasmus application form URL website incomingstudents.um.si".
  * Falls back to the raw question on any error.
  */
-async function buildSearchQuery(
+export async function buildSearchQuery(
   question: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }> | undefined,
   llm: LLMProvider,

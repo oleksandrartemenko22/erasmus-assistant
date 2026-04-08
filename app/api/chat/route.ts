@@ -1,6 +1,7 @@
 // app/api/chat/route.ts
 import { buildGroundedPrompt, buildSystemPrompt } from '@/lib/prompts/grounding'
 import { classifyResponse } from '@/lib/rag/safety'
+import { buildSearchQuery } from '@/lib/rag/pipeline'
 import { getLLMProvider } from '@/lib/llm/index'
 import { getRetriever } from '@/lib/rag/retriever'
 import { createSession, insertMessage } from '@/lib/db/messages'
@@ -101,8 +102,10 @@ export async function POST(request: Request) {
   const retriever = getRetriever()
   const llm = getLLMProvider()
 
-  // Retrieve relevant chunks (non-streaming, happens before we open the stream)
-  const chunks = await retriever.retrieve(question, { topK: 8, minScore: 0.5 })
+  // Build a context-aware search query from the conversation history, then retrieve
+  const searchQuery = await buildSearchQuery(question, history, llm)
+  console.log('[chat] search query:', searchQuery)
+  const chunks = await retriever.retrieve(searchQuery, { topK: 8, minScore: 0.45 })
   const userMessage = buildGroundedPrompt({ question, chunks })
 
   const encoder = new TextEncoder()
