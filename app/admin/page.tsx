@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import type { Document } from '@/types'
+import type { ConversationSession } from '@/app/api/admin/conversations/route'
 
 interface Analytics {
   totalQuestions: number
@@ -15,6 +16,10 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState(false)
   const [documents, setDocuments] = useState<Document[]>([])
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [conversations, setConversations] = useState<ConversationSession[]>([])
+  const [convsLoading, setConvsLoading] = useState(false)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [filterNegative, setFilterNegative] = useState(false)
 
   // File upload state
   const [uploadStatus, setUploadStatus] = useState('')
@@ -44,6 +49,25 @@ export default function AdminPage() {
     setAnalytics(anal)
     setAuthed(true)
     setUploadStatus('')
+    loadConversations(s)
+  }
+
+  async function loadConversations(s: string) {
+    setConvsLoading(true)
+    try {
+      const res = await fetch('/api/admin/conversations', { headers: { 'x-admin-secret': s } })
+      if (res.ok) setConversations(await res.json() as ConversationSession[])
+    } finally {
+      setConvsLoading(false)
+    }
+  }
+
+  function toggleExpanded(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   async function handleLogin(e: { preventDefault(): void }) {
@@ -303,6 +327,99 @@ export default function AdminPage() {
             </div>
           </section>
         )}
+
+        {/* Recent conversations */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Recent conversations {convsLoading && <span className="normal-case font-normal text-gray-400">loading…</span>}
+            </h2>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filterNegative}
+                onChange={(e) => setFilterNegative(e.target.checked)}
+                className="rounded"
+              />
+              Show only negative feedback
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            {conversations
+              .filter((s) => !filterNegative || s.notHelpfulCount > 0)
+              .map((session) => {
+                const isOpen = expandedIds.has(session.id)
+                const msgCount = session.messages.length
+                const date = new Date(session.created_at)
+                return (
+                  <div key={session.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    {/* Collapsed header */}
+                    <button
+                      onClick={() => toggleExpanded(session.id)}
+                      className="w-full px-4 py-3 flex items-center justify-between gap-4 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-xs text-gray-400 shrink-0">
+                          {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className="text-xs text-gray-500 uppercase shrink-0">{session.language}</span>
+                        <span className="text-xs text-gray-600">{msgCount} message{msgCount !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {session.helpfulCount > 0 && (
+                          <span className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                            {session.helpfulCount} helpful
+                          </span>
+                        )}
+                        {session.notHelpfulCount > 0 && (
+                          <span className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                            {session.notHelpfulCount} not helpful
+                          </span>
+                        )}
+                        <span className="text-gray-400 text-xs">{isOpen ? '▲' : '▼'}</span>
+                      </div>
+                    </button>
+
+                    {/* Expanded messages */}
+                    {isOpen && (
+                      <div className="border-t border-gray-100 divide-y divide-gray-50">
+                        {session.messages.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className={`px-4 py-3 flex gap-3 ${msg.role === 'user' ? 'bg-gray-50' : 'bg-white'}`}
+                          >
+                            <span className={`shrink-0 text-xs font-medium w-16 pt-0.5 ${msg.role === 'user' ? 'text-blue-600' : 'text-gray-500'}`}>
+                              {msg.role === 'user' ? 'Student' : 'Bot'}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-800 whitespace-pre-wrap">{msg.content}</p>
+                              <div className="flex items-center gap-3 mt-1">
+                                {msg.escalation_flag && (
+                                  <span className="text-xs text-amber-600">escalated</span>
+                                )}
+                                {msg.feedback === 'helpful' && (
+                                  <span className="text-xs text-green-600">👍 helpful</span>
+                                )}
+                                {msg.feedback === 'not_helpful' && (
+                                  <span className="text-xs text-red-600">👎 not helpful</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            {!convsLoading && conversations.filter((s) => !filterNegative || s.notHelpfulCount > 0).length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-6">
+                {filterNegative ? 'No sessions with negative feedback.' : 'No conversations yet.'}
+              </p>
+            )}
+          </div>
+        </section>
 
       </main>
     </div>
