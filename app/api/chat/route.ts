@@ -21,28 +21,6 @@ function errorResponse(message: string, status: number) {
   })
 }
 
-// ── Rate limiting ─────────────────────────────────────────────────────────────
-const RATE_LIMIT = 20        // requests
-const RATE_WINDOW_MS = 60 * 60 * 1000  // 1 hour
-
-interface RateEntry { count: number; resetAt: number }
-const rateLimitStore = new Map<string, RateEntry>()
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = rateLimitStore.get(ip)
-
-  if (!entry || now >= entry.resetAt) {
-    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
-    return true
-  }
-
-  if (entry.count >= RATE_LIMIT) return false
-
-  entry.count++
-  return true
-}
-
 const HistoryItemSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().max(4000),
@@ -62,15 +40,6 @@ export function OPTIONS() {
 }
 
 export async function POST(request: Request) {
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
-    request.headers.get('x-real-ip') ??
-    'unknown'
-
-  if (!checkRateLimit(ip)) {
-    return errorResponse('Too many requests. Please try again later.', 429)
-  }
-
   let body: unknown
   try {
     body = await request.json()
