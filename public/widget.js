@@ -283,9 +283,12 @@
         }),
       })
 
-      if (!res.ok || !res.body) {
-        throw new Error('Server error')
+      if (!res.ok) {
+        let errMsg = 'Server error'
+        try { const d = await res.json(); errMsg = d.error || errMsg } catch {}
+        throw new Error(errMsg)
       }
+      if (!res.body) throw new Error('Server error')
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -355,11 +358,14 @@
           }
         } catch {}
       }
-    } catch {
+    } catch (err) {
       const placeholder = messages.find((m) => m.id === streamingId)
       if (placeholder) {
-        placeholder.content = 'Could not reach the assistant. Please check your connection.'
-        placeholder.shouldEscalate = true
+        const isRateLimit = err instanceof Error && err.message.includes('limit of 20 questions')
+        placeholder.content = isRateLimit
+          ? err.message
+          : 'Could not reach the assistant. Please check your connection.'
+        placeholder.shouldEscalate = !isRateLimit
         placeholder.streaming = false
       }
       renderMessages()

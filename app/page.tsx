@@ -63,9 +63,11 @@ export default function ChatPage() {
         }),
       })
 
-      if (!res.ok || !res.body) {
-        throw new Error('Server error')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(errData.error ?? 'Server error')
       }
+      if (!res.body) throw new Error('Server error')
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -126,14 +128,17 @@ export default function ChatPage() {
         )
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Sorry, something went wrong.'
+      const isRateLimit = msg.includes('limit of 20 questions')
       setMessages((prev) =>
         prev.map((m) =>
           m.id === streamingId
             ? {
                 ...m,
-                content:
-                  'Sorry, something went wrong. Please try again or contact the International Relations Office.',
-                shouldEscalate: true,
+                content: isRateLimit
+                  ? msg
+                  : 'Sorry, something went wrong. Please try again or contact the International Relations Office.',
+                shouldEscalate: !isRateLimit,
                 streaming: false,
               }
             : m,
